@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  # S3 Bucket for Glue Job Output and Hudi Table Storage
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub
+        - "${AWS::StackName}-${RandomGUID}"
+        - {
+            RandomGUID:
+              !Select [
+                0,
+                !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId]]],
+              ],
+          }
+
+  # DynamoDB Table with Partition Key (PK) and Sort Key (SK) and Streams enabled
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-DynamoDBTable"
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH # Partition Key
+        - AttributeName: SK
+          KeyType: RANGE # Sort Key
+      BillingMode: PAY_PER_REQUEST
+      KinesisStreamSpecification:
+        ApproximateCreationDateTimePrecision: MILLISECOND
+        StreamArn: !GetAtt KinesisStream.Arn
+
+  # Kinesis Data Stream to capture DynamoDB Stream
+  KinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Sub "${AWS::StackName}-KinesisStream"
+      ShardCount: 1
+
+  # IAM Role for Glue Job with Permissions to S3, Kinesis, and DynamoDB
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: GlueJobS3KinesisDDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3Bucket}/*"
+              - Effect: Allow
+                Action:
+                  - kinesis:*
+                Resource: !GetAtt KinesisStream.Arn
+        - PolicyName: AllowIAMActions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+  # Glue Job
+  GlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${AWS::StackName}-GlueJob"
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: gluestreaming
+        ScriptLocation: !Sub "s3://${S3Bucket}/scripts/glue-job-script.py"
+        PythonVersion: 3
+      DefaultArguments:
+        --enable-continuous-cloudwatch-log: true
+        --enable-metrics: true
+        --S3_BUCKET_NAME: !Ref S3Bucket
+      GlueVersion: "4.0"
+      WorkerType: "G.025X"
+      NumberOfWorkers: 2
+      MaxRetries: 0
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "ddb_streaming_glue_database"
+        Description: "Glue database"
+
+  # Glue Table
+  GlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref GlueDatabase
+      TableInput:
+        Name: !Sub "ddb_streaming_glue_table"
+        Description: "Glue table with Kinesis"
+        StorageDescriptor:
+          Location: !Ref GlueDatabase
+          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          Parameters:
+            streamARN: !GetAtt KinesisStream.Arn
+            typeOfData: "kinesis"
+          SerdeInfo:
+            SerializationLibrary: "org.openx.data.jsonserde.JsonSerDe"
+        Parameters:
+          classification: "json"
+        TableType: "EXTERNAL_TABLE"
+
+Outputs:
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref S3Bucket
+
+  DynamoDBTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref DynamoDBTable
+
+  KinesisStreamName:
+    Description: Name of the Kinesis Stream
+    Value: !Ref KinesisStream
+
+  GlueJobName:
+    Description: Name of the Glue Job
+    Value: !Ref GlueJob
