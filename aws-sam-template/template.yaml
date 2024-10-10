@@ -92,6 +92,8 @@ Resources:
         --enable-continuous-cloudwatch-log: true
         --enable-metrics: true
         --S3_BUCKET_NAME: !Ref S3Bucket
+        --conf: spark.serializer=org.apache.spark.serializer.KryoSerializer --conf spark.sql.hive.convertMetastoreParquet=false
+        --datalake-formats: hudi
       GlueVersion: "4.0"
       WorkerType: "G.025X"
       NumberOfWorkers: 2
