@@ -64,8 +64,7 @@ connection_options = {
     "hoodie.datasource.write.hive_style_partitioning": "true",
 }
 
-# ======================================================================
-
+# ====================== Reading data from glue ============================================
 data_frame_DataSource0 = glueContext.create_data_frame.from_catalog(
     database=db_name,
     table_name=kinesis_table_name,
@@ -77,6 +76,7 @@ data_frame_DataSource0 = glueContext.create_data_frame.from_catalog(
 )
 
 
+# ====================== Business Logic ============================================
 def process_batch(data_frame, batch_id):
     row_count = data_frame.count()
     print("row_count ", row_count)
@@ -113,6 +113,7 @@ def process_batch(data_frame, batch_id):
             pass
 
 
+# ====================== start data processing ============================================
 glueContext.forEachBatch(
     frame=data_frame_DataSource0,
     batch_function=process_batch,

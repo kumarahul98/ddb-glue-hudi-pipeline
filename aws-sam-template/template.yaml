@@ -90,6 +90,7 @@ Resources:
         PythonVersion: 3
       DefaultArguments:
         --enable-continuous-cloudwatch-log: true
+        --enable-glue-datacatalog: true
         --enable-metrics: true
         --S3_BUCKET_NAME: !Ref S3Bucket
         --conf: spark.serializer=org.apache.spark.serializer.KryoSerializer --conf spark.sql.hive.convertMetastoreParquet=false
